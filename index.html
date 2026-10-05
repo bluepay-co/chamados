@@ -294,6 +294,18 @@
       margin-top: 4px;
     }
 
+    .sucesso .aviso {
+      display: none;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #92400e;
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 4px;
+    }
+
     .btn-novo {
       background: #6366f1;
       width: auto;
@@ -303,20 +315,6 @@
 
     .btn-novo:hover {
       background: #4f46e5;
-    }
-
-    /* datetime auto */
-    .dt-auto {
-      background: #f1f5f9;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 14px;
-      color: #64748b;
-      font-family: inherit;
-      display: flex;
-      align-items: center;
-      gap: 8px;
     }
   </style>
 </head>
@@ -466,12 +464,6 @@
         <div class="erro" id="err-cx-titulo">Campo obrigatório</div>
       </div>
 
-      <!-- Data/hora automática -->
-      <div>
-        <label>Data e hora da abertura</label>
-        <div class="dt-auto">📅 <span id="cx-datetime">—</span></div>
-      </div>
-
       <!-- Identificador Bluepay -->
       <div>
         <div class="section-label">Identificador Bluepay</div>
@@ -486,7 +478,9 @@
       <div class="row2">
         <div>
           <label>CPF ou CNPJ</label>
-          <input id="cx-documento" type="text" placeholder="000.000.000-00" maxlength="20">
+          <input id="cx-documento" type="text" placeholder="000.000.000-00" maxlength="18"
+            inputmode="numeric" oninput="_mascaraDoc(this)">
+          <div class="erro" id="err-cx-documento">Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) completo</div>
         </div>
         <div>
           <label>Portal</label>
@@ -553,6 +547,7 @@
       <p>Seu chamado foi registrado e a equipe já foi notificada.</p>
       <div class="num" id="suc-num">#—</div>
       <div class="sla" id="suc-sla"></div>
+      <div class="aviso" id="suc-aviso"></div>
       <button class="btn btn-novo" onclick="novoForm()">Abrir outro chamado</button>
     </div>
 
@@ -572,18 +567,6 @@
       document.getElementById('form-cx').style.display = setor === 'Produtos' ? 'flex' : 'none';
     }
 
-    // ── Data/hora automática CX ──
-    function _atualizarDatetime() {
-      const el = document.getElementById('cx-datetime');
-      if (!el) return;
-      const now = new Date();
-      const d = now.toLocaleDateString('pt-BR');
-      const h = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      el.textContent = `${d} às ${h}`;
-    }
-    _atualizarDatetime();
-    setInterval(_atualizarDatetime, 30000);
-
     // ── Prioridades (value = priority da API) ──
     const _PRIO = {
       low: 'Baixa', medium: 'Média', high: 'Alta', critical: 'Crítica', urgent: 'Urgente',
@@ -591,6 +574,22 @@
     function atualizarPrio() {
       const v = document.getElementById('f-prioridade').value;
       document.getElementById('sla-prio-label').textContent = _PRIO[v] || _PRIO.medium;
+    }
+
+    // ── Máscara CPF/CNPJ ──
+    function _mascaraDoc(el) {
+      let v = el.value.replace(/\D/g, '').slice(0, 14);
+      if (v.length <= 11) {
+        v = v.replace(/(\d{3})(\d)/, '$1.$2')
+          .replace(/(\d{3})(\d)/, '$1.$2')
+          .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+      } else {
+        v = v.replace(/(\d{2})(\d)/, '$1.$2')
+          .replace(/(\d{3})(\d)/, '$1.$2')
+          .replace(/(\d{3})(\d)/, '$1/$2')
+          .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+      }
+      el.value = v;
     }
 
     // ── Validação Infra ──
@@ -620,6 +619,13 @@
         if (!el.value.trim()) { err.style.display = 'block'; ok = false; }
         else err.style.display = 'none';
       });
+
+      // CPF/CNPJ é opcional, mas se preenchido precisa estar completo
+      const digitos = document.getElementById('cx-documento').value.replace(/\D/g, '').length;
+      const errDoc = document.getElementById('err-cx-documento');
+      if (digitos && digitos !== 11 && digitos !== 14) { errDoc.style.display = 'block'; ok = false; }
+      else errDoc.style.display = 'none';
+
       return ok;
     }
 
@@ -670,9 +676,11 @@
     }
 
     // ── Upload de anexo (2 passos: upload → comentário) ──
+    // Retorna true quando nao havia anexo ou quando ele chegou ao chamado; false se falhou.
     async function _uploadAnexo(ticketId, inputId) {
       const input = document.getElementById(inputId);
-      if (!input || !input.files.length) return;
+      if (!input || !input.files.length) return true;
+      if (!ticketId || ticketId === '—') return false;
       const file = input.files[0];
       const headers = { 'Authorization': 'Bearer ' + _API_TOKEN };
 
@@ -680,22 +688,26 @@
       const fd = new FormData();
       fd.append('file', file);
       const upRes = await fetch(_API_URL.replace(/\/tickets$/, '/uploads'), { method: 'POST', headers, body: fd });
-      if (!upRes.ok) return;
+      if (!upRes.ok) return false;
       const upData = await upRes.json();
       const signedId = upData.signed_id;
-      if (!signedId) return;
+      if (!signedId) return false;
 
       // Passo 2: anexar ao ticket via PATCH (aparece na aba Anexos do backoffice)
-      await fetch(`${_API_URL}/${ticketId}`, {
+      const patchRes = await fetch(`${_API_URL}/${ticketId}`, {
         method: 'PATCH',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket: { attachment_signed_ids: [signedId] } })
       });
+      return patchRes.ok;
     }
 
     // ── Mostrar sucesso ──
-    function _mostrarSucesso(id, sla_prazo) {
+    function _mostrarSucesso(id, sla_prazo, aviso) {
       document.getElementById('suc-num').textContent = '#' + id;
+      const elAviso = document.getElementById('suc-aviso');
+      elAviso.textContent = aviso || '';
+      elAviso.style.display = aviso ? 'block' : 'none';
       if (sla_prazo) {
         const s = sla_prazo.includes('Z') || sla_prazo.includes('+') ? sla_prazo : sla_prazo + 'Z';
         document.getElementById('suc-sla').textContent = 'Prazo de atendimento: ' + new Date(s).toLocaleString('pt-BR');
@@ -750,8 +762,13 @@
         if (!res.ok) { const t = await res.text(); throw new Error(t); }
         const data = await res.json();
         const ticketId = data.ticket?.id || data.id || '—';
-        await _uploadAnexo(ticketId, 'f-arquivo');
-        _mostrarSucesso(ticketId, null);
+        let anexoOk = true;
+        try {
+          anexoOk = await _uploadAnexo(ticketId, 'f-arquivo');
+        } catch (_) {
+          anexoOk = false;
+        }
+        _mostrarSucesso(ticketId, null, anexoOk ? '' : 'O chamado foi aberto, mas o anexo não pôde ser enviado. Encaminhe o arquivo pelo chat citando o número do chamado.');
       } catch (e) {
         alert('Erro ao enviar: ' + e.message);
         btn.disabled = false; btn.textContent = 'Abrir Chamado';
@@ -807,8 +824,13 @@
         if (!res.ok) { const t = await res.text(); throw new Error(t); }
         const data = await res.json();
         const ticketId = data.ticket?.id || data.id || '—';
-        await _uploadAnexo(ticketId, 'cx-arquivo');
-        _mostrarSucesso(ticketId, null);
+        let anexoOk = true;
+        try {
+          anexoOk = await _uploadAnexo(ticketId, 'cx-arquivo');
+        } catch (_) {
+          anexoOk = false;
+        }
+        _mostrarSucesso(ticketId, null, anexoOk ? '' : 'O chamado foi aberto, mas o anexo não pôde ser enviado. Encaminhe o arquivo pelo chat citando o número do chamado.');
       } catch (e) {
         alert('Erro ao enviar: ' + e.message);
         btn.disabled = false; btn.textContent = 'Abrir Chamado';
