@@ -478,8 +478,8 @@
       <div class="row2">
         <div>
           <label>CPF ou CNPJ</label>
-          <input id="cx-documento" type="text" placeholder="000.000.000-00" maxlength="18"
-            inputmode="numeric" oninput="_mascaraDoc(this)">
+          <input id="cx-documento" type="text" placeholder="000.000.000-00" maxlength="18" inputmode="numeric"
+            oninput="_mascaraDoc(this)">
           <div class="erro" id="err-cx-documento">Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) completo</div>
         </div>
         <div>
@@ -718,7 +718,7 @@
       document.getElementById('sucesso-body').style.display = 'flex';
     }
 
-    // ── Enviar Infra → API externa (Tecnologia, area_id=1) ──
+    // ── Enviar Infra → API externa (Infraestrutura, area_id=7) ──
     async function enviar() {
       if (!validar()) return;
       const btn = document.getElementById('btn-enviar-infra');
