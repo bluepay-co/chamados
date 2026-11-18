@@ -394,7 +394,7 @@
 
       <div>
         <label class="required">Descrição detalhada</label>
-        <textarea id="f-descricao"
+        <textarea id="f-descricao" maxlength="15000"
           placeholder="Descreva o problema com o máximo de detalhes: o que aconteceu, quando começou, mensagens de erro, etc."></textarea>
         <div class="erro" id="err-descricao">Campo obrigatório</div>
       </div>
@@ -506,7 +506,7 @@
 
       <div>
         <label class="required">Descrição do incidente</label>
-        <textarea id="cx-descricao" style="min-height:110px"
+        <textarea id="cx-descricao" maxlength="15000" style="min-height:110px"
           placeholder="Descreva o incidente em detalhes: o que ocorreu, quando, qual o impacto, passos para reproduzir, etc."></textarea>
         <div class="erro" id="err-cx-descricao">Campo obrigatório</div>
       </div>
@@ -556,7 +556,6 @@
   <script>
     // ── Config API externa ──
     const _API_URL = 'https://mcp.blueoffice.tech/form/tickets';
-    const _API_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkYWY4MWEyMi04YzY5LTRmMTUtYjlkMS05ZjZkZTdhM2NkNTUifQ.WiMpwP37sWHuHBn040FZNK6rR-zTg0ulMe5yzmuJb9I';
 
     // ── Setor ──
     function selecionarSetor(setor) {
@@ -677,17 +676,23 @@
 
     // ── Upload de anexo (2 passos: upload → comentário) ──
     // Retorna true quando nao havia anexo ou quando ele chegou ao chamado; false se falhou.
-    async function _uploadAnexo(ticketId, inputId) {
+    // O formulário não manda token: o MCP (rota /form) autentica no bluepay-tickets.
+    // A criação devolve um attachment_token, exigido para anexar arquivo ao chamado.
+    async function _respostaErro(res) {
+      if (res.status === 429) return 'Muitos envios em pouco tempo. Aguarde alguns minutos e tente de novo.';
+      return 'Não foi possível abrir o chamado (HTTP ' + res.status + ').';
+    }
+
+    async function _uploadAnexo(ticketId, attachmentToken, inputId) {
       const input = document.getElementById(inputId);
       if (!input || !input.files.length) return true;
-      if (!ticketId || ticketId === '—') return false;
+      if (!ticketId || ticketId === '—' || !attachmentToken) return false;
       const file = input.files[0];
-      const headers = { 'Authorization': 'Bearer ' + _API_TOKEN };
 
       // Passo 1: subir o arquivo
       const fd = new FormData();
       fd.append('file', file);
-      const upRes = await fetch(_API_URL.replace(/\/tickets$/, '/uploads'), { method: 'POST', headers, body: fd });
+      const upRes = await fetch(_API_URL.replace(/\/tickets$/, '/uploads'), { method: 'POST', body: fd });
       if (!upRes.ok) return false;
       const upData = await upRes.json();
       const signedId = upData.signed_id;
@@ -696,7 +701,7 @@
       // Passo 2: anexar ao ticket via PATCH (aparece na aba Anexos do backoffice)
       const patchRes = await fetch(`${_API_URL}/${ticketId}`, {
         method: 'PATCH',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Attachment-Token': attachmentToken },
         body: JSON.stringify({ ticket: { attachment_signed_ids: [signedId] } })
       });
       return patchRes.ok;
@@ -756,15 +761,15 @@
       try {
         const res = await fetch(_API_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _API_TOKEN },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        if (!res.ok) { const t = await res.text(); throw new Error(t); }
+        if (!res.ok) throw new Error(await _respostaErro(res));
         const data = await res.json();
-        const ticketId = data.ticket?.id || data.id || '—';
+        const ticketId = data.id || '—';
         let anexoOk = true;
         try {
-          anexoOk = await _uploadAnexo(ticketId, 'f-arquivo');
+          anexoOk = await _uploadAnexo(ticketId, data.attachment_token, 'f-arquivo');
         } catch (_) {
           anexoOk = false;
         }
@@ -818,15 +823,15 @@
       try {
         const res = await fetch(_API_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _API_TOKEN },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        if (!res.ok) { const t = await res.text(); throw new Error(t); }
+        if (!res.ok) throw new Error(await _respostaErro(res));
         const data = await res.json();
-        const ticketId = data.ticket?.id || data.id || '—';
+        const ticketId = data.id || '—';
         let anexoOk = true;
         try {
-          anexoOk = await _uploadAnexo(ticketId, 'cx-arquivo');
+          anexoOk = await _uploadAnexo(ticketId, data.attachment_token, 'cx-arquivo');
         } catch (_) {
           anexoOk = false;
         }
